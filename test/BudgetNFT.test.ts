@@ -5,6 +5,7 @@ let { assert } = require("chai");
 let { ethers, web3 } = require("hardhat");
 let daiABI = require("./abis/fDAIABI");
 import traveler from "ganache-time-traveler";
+import { BudgetNFT  } from "../typechain";
 const TEST_TRAVEL_TIME = 3600 * 2; // 1 hours
 
 
@@ -16,11 +17,11 @@ let provider = web3;
 
 let accounts: any[]
 
-let sf: { createSigner: (arg0: { signer: any; provider: any; }) => any; loadSuperToken: (arg0: string) => any; settings: { config: { hostAddress: any; cfaV1Address: any; }; }; cfaV1: { createFlow: (arg0: { receiver: any; superToken: any; flowRate: any; }) => any; getNetFlow: (arg0: { superToken: any; account: any; providerOrSigner: any; }) => any; }; };
-let dai: { mint: (arg0: any, arg1: any) => any; approve: (arg0: any, arg1: any) => any; connect: (arg0: any) => { (): any; new(): any; mint: { (arg0: any, arg1: any): any; new(): any; }; approve: { (arg0: any, arg1: any): any; new(): any; }; }; };
-let daix: { underlyingToken: { address: any; }; address: any; balanceOf: (arg0: { account: any; providerOrSigner: any; }) => any; upgrade: (arg0: { amount: any; }) => any; }
-let superSigner: any
-let BudgetNFT: { address: any; issueNFT: (arg0: any, arg1: any) => any; burnNFT: (arg0: number) => any; editNFT: (arg0: number, arg1: any) => any; connect: (arg0: any) => { (): any; new(): any; splitStream: { (arg0: number, arg1: any): any; new(): any; }; mergeStreams: { (arg0: number, arg1: number): any; new(): any; }; }; }
+let sf: InstanceType<typeof Framework>;;
+let dai: InstanceType<typeof daiABI>;
+let daix: InstanceType<typeof daiABI>;
+let superSigner: InstanceType<typeof sf.createSigner>;
+let budgetNFT: InstanceType<typeof BudgetNFT>;
 
 let errorHandler = (err: any) => {
   if (err) throw err;
@@ -75,7 +76,7 @@ before(async function () {
   let App = await ethers.getContractFactory("BudgetNFT", accounts[0]);
 
   //deploy the contract
-  BudgetNFT = await App.deploy(
+  budgetNFT = await App.deploy(
     "BudgetNFT",
     "BNFT",
     sf.settings.config.hostAddress,
@@ -84,7 +85,7 @@ before(async function () {
   );
 
   const appInitialBalance = await daix.balanceOf({
-    account: BudgetNFT.address,
+    account: budgetNFT.address,
     providerOrSigner: accounts[0]
   });
 
@@ -110,7 +111,7 @@ before(async function () {
 
   // add flow to contract
   const createFlowOperation = await sf.cfaV1.createFlow({
-    receiver: BudgetNFT.address,
+    receiver: budgetNFT.address,
     superToken: daix.address,
     flowRate: toWad(0.01).toString(),
   })
@@ -121,7 +122,7 @@ before(async function () {
   console.log("go forward in time");
   await traveler.advanceTimeAndBlock(TEST_TRAVEL_TIME);
 
-  const balance = await daix.balanceOf({ account: BudgetNFT.address, providerOrSigner: accounts[0] });
+  const balance = await daix.balanceOf({ account: budgetNFT.address, providerOrSigner: accounts[0] });
   console.log('daix bal after flow: ', balance);
 });
 
@@ -160,13 +161,13 @@ describe("issue NFT", async function () {
     let alice = accounts[1];
 
     // key action - NFT is issued to alice w flowrate
-    await BudgetNFT.issueNFT(
+    await budgetNFT.issueNFT(
       alice.address,
       toWad(0.001).toString(),
     );
 
     const aliceFlow = await netFlowRate(alice)
-    const appFlowRate = await netFlowRate(BudgetNFT);
+    const appFlowRate = await netFlowRate(budgetNFT);
     const adminFlowRate = await netFlowRate(accounts[0]);
 
     console.log("alice flow: ", aliceFlow);
@@ -188,27 +189,27 @@ describe("issue NFT", async function () {
     );
 
     //burn NFT created in this test
-    await BudgetNFT.burnNFT(0);
+    await budgetNFT.burnNFT(0);
   });
 
   it("Case #2 - NFT is edited", async () => {
     let alice = accounts[1];
 
     // key action - NFT is issued to alice w flowrate
-    await BudgetNFT.issueNFT(
+    await budgetNFT.issueNFT(
       alice.address,
       toWad(0.001).toString(),
     );
 
     //key action #2 = NFT flowRate is edited. first param here is tokenId, which is now 1
-    await BudgetNFT.editNFT(
+    await budgetNFT.editNFT(
       1,
       toWad(0.002).toString(),
     );
 
     const aliceFlow = await netFlowRate(alice);
 
-    const appFlowRate = await netFlowRate(BudgetNFT);
+    const appFlowRate = await netFlowRate(budgetNFT);
 
     const adminFlowRate = await netFlowRate(accounts[0]);
 
@@ -227,7 +228,7 @@ describe("issue NFT", async function () {
     );
 
     //burn NFT created in this test
-    await BudgetNFT.burnNFT(1);
+    await budgetNFT.burnNFT(1);
   });
 });
 
@@ -236,7 +237,7 @@ describe("burn NFT", async function () {
     let alice = accounts[1];
 
     //key action - NFT is issued to alice w flowrate
-    await BudgetNFT.issueNFT(
+    await budgetNFT.issueNFT(
       alice.address,
       toWad(0.001).toString(),
     );
@@ -251,12 +252,12 @@ describe("burn NFT", async function () {
     );
 
     //key action #2 - NFT is burned, which should turn off flow rate (this token id is number 2)
-    await BudgetNFT.burnNFT(2);
+    await budgetNFT.burnNFT(2);
 
     const aliceFlowAfterBurned = await netFlowRate(alice);
     console.log("Alice flow rate after ID #2 is burned " + aliceFlowAfterBurned);
 
-    const appFlow = await netFlowRate(BudgetNFT);
+    const appFlow = await netFlowRate(budgetNFT);
     const adminFlow = await netFlowRate(accounts[0]);
 
     //make sure that alice receives correct flow rate
@@ -280,13 +281,13 @@ describe("split and merge NFTs", async function () {
     let alice = accounts[1];
 
     //key action - NFT is issued to alice w flowrate
-    await BudgetNFT.issueNFT(
+    await budgetNFT.issueNFT(
       alice.address,
       toWad(0.001).toString(),
     );
 
     //key action #2 - NFT is split, which should cut flow rate in half from each NFT. this token ID is number 3
-    await BudgetNFT.connect(alice).splitStream(
+    await budgetNFT.connect(alice).splitStream(
       3,
       toWad(0.0005).toString(),
     );
@@ -302,7 +303,7 @@ describe("split and merge NFTs", async function () {
 
     //key action #3 - new NFT creating in split is burned, leaving only 1/2 of alice flow rate left
     //NFT being burned is Alice's 4th token
-    await BudgetNFT.burnNFT(4);
+    await budgetNFT.burnNFT(4);
 
     const aliceUpdatedFlow = await netFlowRate(alice);
 
@@ -312,7 +313,7 @@ describe("split and merge NFTs", async function () {
       "Alice flow rate is inaccurate, should be 1/2 original"
     );
 
-    const appFlow = await netFlowRate(BudgetNFT);
+    const appFlow = await netFlowRate(budgetNFT);
     const adminFlow = await netFlowRate(accounts[0]);
 
     // make sure app has right flow rate
@@ -323,20 +324,20 @@ describe("split and merge NFTs", async function () {
     );
 
     //burn NFT created in this test - #4 is already burned, so need to also burn 3
-    await BudgetNFT.burnNFT(3);
+    await budgetNFT.burnNFT(3);
   });
 
   it("Case #2 - NFT is issued to Alice, split, then merged again", async () => {
     let alice = accounts[1];
 
     //key action - NFT is issued to alice w flowrate
-    await BudgetNFT.issueNFT(
+    await budgetNFT.issueNFT(
       alice.address,
       toWad(0.001).toString(),
     );
 
     //key action #2 - NFT is split, which should cut flow rate in half from each NFT
-    await BudgetNFT.connect(alice).splitStream(
+    await budgetNFT.connect(alice).splitStream(
       5,
       toWad(0.0005).toString(),
     );
@@ -354,11 +355,11 @@ describe("split and merge NFTs", async function () {
 
     //key action #3 - 2 new NFTs are merged, alice should still have 100% of flow rate
     //note: the newly split NFT from previous action in this case is now ID #6. it is also burned by this action
-    await BudgetNFT.connect(alice).mergeStreams(5, 6);
+    await budgetNFT.connect(alice).mergeStreams(5, 6);
 
     const aliceUpdatedFlow = await netFlowRate(alice);
     const adminFlow = await netFlowRate(accounts[0]);
-    const appFlow = await netFlowRate(BudgetNFT);
+    const appFlow = await netFlowRate(budgetNFT);
 
     assert.equal(
       aliceUpdatedFlow,
@@ -374,6 +375,6 @@ describe("split and merge NFTs", async function () {
     );
 
     //burn NFT created in this test
-    await BudgetNFT.burnNFT(5);
+    await budgetNFT.burnNFT(5);
   });
 })
