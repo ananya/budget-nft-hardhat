@@ -116,49 +116,51 @@ before(async function () {
     console.log('daix bal after flow: ', balance);
 });
 
+beforeEach(async function () {
+  let alice = accounts[1];
+
+  await dai.connect(alice).mint(
+    alice.address, ethers.utils.parseEther("1000")
+  );
+
+  await dai.connect(alice).approve(
+    daix.address, ethers.utils.parseEther("1000")
+  );
+
+  const daixUpgradeOperation = daix.upgrade({
+      amount: ethers.utils.parseEther("1000")
+  });
+
+  await daixUpgradeOperation.exec(alice);
+
+  const daiBal = await daix.balanceOf({account: alice.address, providerOrSigner: accounts[0]});
+  console.log('daix bal for acct alice: ', daiBal);
+});
+
+async function netFlowRate(user: any) {
+  const flow = await sf.cfaV1.getNetFlow({
+      superToken: daix.address,
+      account: user.address,
+      providerOrSigner: superSigner
+  });
+  return flow;
+}
+
 describe("issue NFT", async function () {
   it("Case #1 - NFT is issued to Alice", async () => {
-    const alice = accounts[1];
-
-    await dai.connect(alice).mint(
-      alice.address, ethers.utils.parseEther("1000")
-    );
-
-    await dai.connect(alice).approve(daix.address, ethers.utils.parseEther("1000"));
-
-    const daixUpgradeOperation = daix.upgrade({
-        amount: ethers.utils.parseEther("1000")
-    });
-
-    await daixUpgradeOperation.exec(alice);
-
-    const daiBal = await daix.balanceOf({account: alice.address, providerOrSigner: accounts[0]});
-    console.log('daix bal for acct alice: ', daiBal);
+    let alice = accounts[1];
 
     // key action - NFT is issued to alice w flowrate
-    console.log("flowRate", toWad(0.001).toString());
     await BudgetNFT.issueNFT(
       alice.address,
       toWad(0.000001).toString(),
     );
 
-    const aliceFlow = await sf.cfaV1.getNetFlow({
-      superToken: daix.address,
-      account: alice.address,
-      providerOrSigner: superSigner
-    });
+    const aliceFlow = await netFlowRate(alice)
 
-    const appFlowRate = await sf.cfaV1.getNetFlow({
-      superToken: daix.address,
-      account: BudgetNFT.address,
-      providerOrSigner: superSigner
-    });
+    const appFlowRate = await netFlowRate(BudgetNFT);
 
-    const adminFlowRate = await sf.cfaV1.getNetFlow({
-      superToken: daix.address,
-      account: accounts[0].address,
-      providerOrSigner: superSigner
-    });
+    const adminFlowRate = await netFlowRate(accounts[0]);
 
     console.log("alice flow: ", aliceFlow);
     console.log("app flow: ", appFlowRate);
@@ -181,4 +183,185 @@ describe("issue NFT", async function () {
     //burn NFT created in this test
     await BudgetNFT.burnNFT(0);
   });
+
+  it("Case #2 - NFT is edited", async () => {
+    let alice = accounts[1];
+
+    // key action - NFT is issued to alice w flowrate
+    await BudgetNFT.issueNFT(
+      alice.address,
+      toWad(0.000001).toString(),
+    );
+
+    //key action #2 = NFT flowRate is edited. first param here is tokenId, which is now 1
+    await BudgetNFT.editNFT(
+      1,
+      toWad(0.000002).toString(),
+    );
+
+    const aliceFlow = await netFlowRate(alice)
+
+    const appFlowRate = await netFlowRate(BudgetNFT);
+
+    const adminFlowRate = await netFlowRate(accounts[0]);
+
+    //burn NFT created in this test
+    await BudgetNFT.burnNFT(1);
+    
+    const aliceFlowAfterBurned = await netFlowRate(alice);
+
+    console.log("Alice flow rate after ID #1 is burned " + aliceFlowAfterBurned);
+    //make sure that alice receives correct flow rate
+    assert.equal(
+        aliceFlow,
+        toWad(0.000002).toString(),
+        "Alice flow rate is inaccurate"
+    );
+    //make sure app has right flow rate
+    assert.equal(
+        Number(appFlowRate),
+        (Number(adminFlowRate) * - 1) - Number(aliceFlow),
+        "app net flow is incorrect"
+    );
+
+  });
 });
+
+describe("burn NFT", async function () {
+  it("Case #1 - NFT is issued to Alice, then burned", async () => {
+      let alice = accounts[1];
+
+      //key action - NFT is issued to alice w flowrate
+      await BudgetNFT.issueNFT(
+        alice.address, 
+        toWad(0.000001).toString(),
+      );
+
+      //key action #2 - NFT is burned, which should turn off flow rate (this token id is number 2)
+      await BudgetNFT.burnNFT(2);
+
+      const aliceFlowAfterBurned = await netFlowRate(alice);
+      console.log("Alice flow rate after ID #2 is burned " + aliceFlowAfterBurned);
+
+      const aliceFlow = await netFlowRate(alice);
+
+      const appFlow = await netFlowRate(BudgetNFT);
+      const adminFlow = await netFlowRate(accounts[0]);
+
+      //make sure that alice receives correct flow rate
+      assert.equal(
+          aliceFlow,
+          0,
+          "Alice flow rate is inaccurate, should be zero"
+      );
+      //make sure app has right flow rate
+      assert.equal(
+          Number(appFlow),
+          (Number(adminFlow) * - 1),
+          "app net flow is incorrect"
+      );
+  });
+})
+
+describe("split and merge NFTs", async function () {
+  it("Case #1 - NFT is issued to Alice, then split", async () => {
+      let alice = accounts[1];
+      // await logUsers();
+
+      //key action - NFT is issued to alice w flowrate
+      await BudgetNFT.issueNFT(
+        alice.address,
+        toWad(0.00001).toString(),
+      );
+
+      //key action #2 - NFT is split, which should cut flow rate in half from each NFT. this token ID is number 3
+      await BudgetNFT.connect(alice).splitStream(
+        3, 
+        toWad(0.000005).toString(),
+      );
+
+      const aliceFlow = await netFlowRate(alice);
+
+      //make sure that alice receives correct flow rate
+      assert.equal(
+          aliceFlow,
+          toWad(0.00001),
+          "Alice flow rate is inaccurate, should be the same at first"
+      );
+
+      //key action #3 - new NFT creating in split is burned, leaving only 1/2 of alice flow rate left
+      //NFT being burned is Alice's 4th token
+      await BudgetNFT.burnNFT(4);
+
+      const aliceUpdatedFlow = await netFlowRate(alice);
+
+      assert.equal(
+          aliceUpdatedFlow,
+          toWad(0.000005).toString(),
+          "Alice flow rate is inaccurate, should be 1/2 original"
+      );
+
+      const appFlow = await netFlowRate(BudgetNFT);
+      const adminFlow = await netFlowRate(accounts[0]);
+      // make sure app has right flow rate
+      assert.equal(
+          Number(appFlow) + Number(aliceUpdatedFlow),
+          (Number(adminFlow) * - 1),
+          "app net flow is incorrect"
+      );
+
+      //burn NFT created in this test - #4 is already burned, so need to also burn 3
+      await BudgetNFT.burnNFT(3);
+
+  });
+
+  it("Case #2 - NFT is issued to Alice, split, then merged again", async () => {
+      let alice = accounts[1];
+  
+      //key action - NFT is issued to alice w flowrate
+      await BudgetNFT.issueNFT(
+        alice.address,
+        toWad(0.00001).toString(),
+      );
+
+      //key action #2 - NFT is split, which should cut flow rate in half from each NFT
+      await BudgetNFT.connect(alice).splitStream(
+        5,
+        toWad(0.000005).toString(),
+      );
+
+      const aliceFlow = await netFlowRate(alice);
+
+      console.log(`Alice Flow Rate is now: ${aliceFlow}`);
+
+      //make sure that alice receives correct flow rate
+      assert.equal(
+          aliceFlow,
+          toWad(0.00001),
+          "Alice flow rate is inaccurate, should be the same at first"
+      );
+
+      //key action #3 - 2 new NFTs are merged, alice should still have 100% of flow rate
+      //note: the newly split NFT from previous action in this case is now ID #6. it is also burned by this action
+      await BudgetNFT.connect(alice).mergeStreams(5, 6);
+
+      const aliceUpdatedFlow = await netFlowRate(alice);
+      const adminFlow = await netFlowRate(accounts[0]);
+      const appUpdatedFlow = await netFlowRate(BudgetNFT);
+
+      assert.equal(
+          aliceUpdatedFlow,
+          toWad(0.00001),
+          "Alice flow rate is inaccurate, should be 100% of original"
+      );
+      // make sure app has right flow rate
+      assert.equal(
+          Number(appUpdatedFlow) + Number(aliceUpdatedFlow),
+          (Number(adminFlow) * - 1),
+          "app net flow is incorrect"
+      );
+
+      //burn NFT created in this test
+      await BudgetNFT.burnNFT(5);
+  });
+})
