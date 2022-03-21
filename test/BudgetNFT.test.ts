@@ -1,9 +1,12 @@
 
-let { web3tx, toWad, wad4human } = require("@decentral.ee/web3-helpers");
+let { toWad } = require("@decentral.ee/web3-helpers");
 let { Framework } = require("@superfluid-finance/sdk-core");
 let { assert } = require("chai");
 let { ethers, web3, artifacts } = require("hardhat");
 let daiABI  = require("./abis/fDAIABI");
+const traveler = require("ganache-time-traveler");
+const TEST_TRAVEL_TIME = 3600 * 2; // 1 hours
+
 
 let deployFramework = require("@superfluid-finance/ethereum-contracts/scripts/deploy-framework");
 let deployTestToken = require("@superfluid-finance/ethereum-contracts/scripts/deploy-test-token");
@@ -43,6 +46,9 @@ before(async function () {
         web3,
         from: accounts[0].address,
     });
+
+    console.log("fDAIxAddress: ", fDAIxAddress);
+    console.log("fDAIAddress: ", fDAIAddress);
     
     //initialize the superfluid framework...put custom and web3 only bc we are using hardhat locally
     sf = await Framework.create({
@@ -81,98 +87,98 @@ before(async function () {
         providerOrSigner: accounts[0]
     });
 
+    await dai.connect(accounts[0]).mint(
+      accounts[0].address, ethers.utils.parseEther("1000")
+    );
+
+    await dai.connect(accounts[0]).approve(daix.address, ethers.utils.parseEther("1000"));
+
+    const daixUpgradeOperation = daix.upgrade({
+        amount: ethers.utils.parseEther("1000")
+    });
+
+    await daixUpgradeOperation.exec(accounts[0]);
+
+    const daiBal = await daix.balanceOf({account: accounts[0].address, providerOrSigner: accounts[0]});
+    console.log('daix bal for acct 0: ', daiBal);
+
     const createFlowOperation = await sf.cfaV1.createFlow({
         receiver: BudgetNFT.address,
         superToken: daix.address,
-        flowRate: "100000000",
-    })    
+        flowRate: toWad(0.00001).toString(),
+    })
     
     const txn = await createFlowOperation.exec(accounts[0]);
-    // const receipt = await txn.wait();
+    const receipt = await txn.wait();
+    await traveler.advanceTimeAndBlock(TEST_TRAVEL_TIME);
+
+    const balance = await daix.balanceOf({account: BudgetNFT.address, providerOrSigner: accounts[0]}); 
+    console.log('daix bal after flow: ', balance);
 });
-
-// beforeEach(async function () {
-    
-//     await dai.connect(accounts[0]).mint(
-//         accounts[0].address, ethers.utils.parseEther("1000")
-//     );
-
-//     await dai.connect(accounts[0]).approve(daix.address, ethers.utils.parseEther("1000"));
-
-//     const daixUpgradeOperation = daix.upgrade({
-//         amount: ethers.utils.parseEther("1000")
-//     });
-
-//     await daixUpgradeOperation.exec(accounts[0]);
-
-//     const daiBal = await daix.balanceOf({account: accounts[0].address, providerOrSigner: accounts[0]});
-//     console.log('daix bal for acct 0: ', daiBal);
-
-//     await daix.transfer({
-//         recipient: accounts[2], 
-//         amount: ethers.utils.parseEther("500")
-//     });
-// });
 
 describe("issue NFT", async function () {
   it("Case #1 - NFT is issued to Alice", async () => {
-    // const alice = accounts[1];
+    const alice = accounts[1];
 
-    // await dai.connect(alice).mint(
-    //   alice.address, ethers.utils.parseEther("1000")
-    // );
+    await dai.connect(alice).mint(
+      alice.address, ethers.utils.parseEther("1000")
+    );
 
-    // await dai.connect(alice).approve(daix.address, ethers.utils.parseEther("1000"));
+    await dai.connect(alice).approve(daix.address, ethers.utils.parseEther("1000"));
 
-    // const daixUpgradeOperation = daix.upgrade({
-    //     amount: ethers.utils.parseEther("1000")
-    // });
+    const daixUpgradeOperation = daix.upgrade({
+        amount: ethers.utils.parseEther("1000")
+    });
 
-    // await daixUpgradeOperation.exec(alice);
+    await daixUpgradeOperation.exec(alice);
 
-    // const daiBal = await daix.balanceOf({account: alice.address, providerOrSigner: accounts[0]});
-    // console.log('daix bal for acct alice: ', daiBal);
+    const daiBal = await daix.balanceOf({account: alice.address, providerOrSigner: accounts[0]});
+    console.log('daix bal for acct alice: ', daiBal);
 
-    
-    // // key action - NFT is issued to alice w flowrate
-    // await BudgetNFT.issueNFT(
-    //   alice.address,
-    //   "1"
-    // );
+    // key action - NFT is issued to alice w flowrate
+    console.log("flowRate", toWad(0.001).toString());
+    await BudgetNFT.issueNFT(
+      alice.address,
+      toWad(0.000001).toString(),
+    );
 
-    // const aliceFlow = await sf.cfaV1.getNetFlow({
-    //   superToken: daix.address,
-    //   account: alice.address,
-    //   providerOrSigner: superSigner
-    // });
+    const aliceFlow = await sf.cfaV1.getNetFlow({
+      superToken: daix.address,
+      account: alice.address,
+      providerOrSigner: superSigner
+    });
 
-    // const appFlowRate = await sf.cfaV1.getNetFlow({
-    //   superToken: daix.address,
-    //   account: BudgetNFT.address,
-    //   providerOrSigner: superSigner
-    // });
+    const appFlowRate = await sf.cfaV1.getNetFlow({
+      superToken: daix.address,
+      account: BudgetNFT.address,
+      providerOrSigner: superSigner
+    });
 
-    // const adminFlowRate = await sf.cfaV1.getNetFlow({
-    //   superToken: daix.address,
-    //   account: accounts[0].address,
-    //   providerOrSigner: superSigner
-    // });
+    const adminFlowRate = await sf.cfaV1.getNetFlow({
+      superToken: daix.address,
+      account: accounts[0].address,
+      providerOrSigner: superSigner
+    });
 
-    // //make sure that alice receives correct flow rate
-    // assert.equal(
-    //   aliceFlow.toString(),
-    //   toWad(0.001).toString(),
-    //   "alice flow is inaccurate"
-    // );
+    console.log("alice flow: ", aliceFlow);
+    console.log("app flow: ", appFlowRate);
+    console.log("admin flow: ", adminFlowRate);
 
-    // //make sure app has right flow rate
-    // assert.equal(
-    //   Number(adminFlowRate),
-    //   (Number(adminFlowRate) * - 1) - Number(aliceFlow),
-    //   "app net flow is incorrect"
-    // );
+    //make sure that alice receives correct flow rate
+    assert.equal(
+      aliceFlow.toString(),
+      toWad(0.000001).toString(),
+      "alice flow is inaccurate"
+    );
 
-    // //burn NFT created in this test
-    // await BudgetNFT.burnNFT(0, { from: accounts[0] });
+    //make sure app has right flow rate
+    assert.equal(
+      Number(appFlowRate),
+      (Number(adminFlowRate) * - 1) - Number(aliceFlow),
+      "app net flow is incorrect"
+    );
+
+    //burn NFT created in this test
+    await BudgetNFT.burnNFT(0);
   });
 });
